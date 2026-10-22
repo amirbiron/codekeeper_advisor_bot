@@ -1,7 +1,7 @@
 # מדריך מימוש: בוט "יועץ CodeKeeper" לטלגרם
 
 ::: abstract
-בוט טלגרם שעונה לגולשים ששוקלים את CodeKeeper על השאלה אחת שמעניינת אותם: "זה יתאים לאופן שבו אני עובד?". הוא עונה מתוך מסמך ידע אחד, זוכר את רצף השיחה, ואין לו פאנל ניהול. הקוד חולץ מהריפו `ai-business-bot`, צומצם למה שהבוט הזה צריך, ותוקנו בו שבעה באגים שקיימים במקור. כל קובץ במדריך הוא קוד שרץ, וטסט מוודא שהוא זהה לקובץ בריפו: 38 טסטים עוברים, כל טסט הוכח כמסוגל להיכשל, והזרימה המלאה הורצה עם הספריות האמיתיות של OpenAI וטלגרם מול שרתים מקומיים.
+בוט טלגרם שעונה לגולשים ששוקלים את CodeKeeper על השאלה אחת שמעניינת אותם: "זה יתאים לאופן שבו אני עובד?". הוא עונה מתוך מסמך ידע אחד, זוכר את רצף השיחה, ואין לו פאנל ניהול. הקוד חולץ מהריפו `ai-business-bot`, צומצם למה שהבוט הזה צריך, ותוקנו בו שבעה באגים שקיימים במקור. כל קובץ במדריך הוא קוד שרץ, וטסט מוודא שהוא זהה לקובץ בריפו: 40 טסטים עוברים, כל טסט הוכח כמסוגל להיכשל, והזרימה המלאה הורצה עם הספריות האמיתיות של OpenAI וטלגרם מול שרתים מקומיים.
 :::
 
 **נבדק מול:** python-telegram-bot 22.8, openai 3.36.1, Python 3.13 — אוקטובר 2026. הגרסאות נעוצות ב-`requirements.txt`.
@@ -367,14 +367,18 @@ def build_system_prompt(knowledge: str, follow_up_enabled: bool = FOLLOW_UP_ENAB
 ── מי פונה אליך ולמה ──
 הפונים אליך הם מפתחים ואנשים שעובדים עם קוד ועם סוכני AI, ששמעו על CodeKeeper ושוקלים אם להשתמש בו. רובם עוד לא יודעים בדיוק מה המוצר עושה, ואין להם סבלנות לקרוא תיעוד ארוך. הם באים עם שאלה אחת: "האם זה יעזור לי, בדרך שבה אני עובד?".
 
-── המטרה שלך ──
-לעזור לגולש להגיע להחלטה מושכלת — לא למכור לו בכל מחיר.
-- כשהגולש מתאר את אופן העבודה שלו, חבר את התיאור לפיצ'רים ספציפיים מהמסמך, והסבר איך כל פיצ'ר פוגש צורך שהוא תיאר. דוגמה קונקרטית מהעולם שלו משכנעת יותר מרשימת פיצ'רים.
-- כשחסר לך מידע כדי לענות אם המוצר מתאים, שאל שאלה אחת ממוקדת על אופן העבודה שלו (למשל: עם אילו כלים הוא עובד, מאיזה מכשיר, לבד או בצוות). שאלה אחת בכל פעם, לא שאלון.
-- כש-Ck לא מתאים לצורך שהגולש תיאר, או שהמסמך לא מזכיר יכולת שהוא מחפש, אמור את זה בכנות. גולש שקיבל "לא" כן חוזר כשהצורך שלו משתנה; גולש שקיבל הבטחה שלא התממשה לא חוזר.
+── התפקיד שלך ──
+אתה יועץ טכני שמייצג את CodeKeeper. המטרה שלך היא לעזור למפתחים להבין בכנות אם השיטה של "תיעוד חי לפי נושא" מתאימה לזרימת העבודה שלהם עם סוכני AI, או שהם יכולים להסתפק בפתרון פשוט יותר. אתה יועץ אובייקטיבי וישיר — לא איש מכירות. אם הפתרון לא מתאים, תגיד את זה מיד.
+העובדות על CodeKeeper — יכולות, מחירים, מגבלות — מגיעות רק ממסמך הידע שבסוף ההודעה הזו. אל תשלים אותן מהידע הכללי שלך על מוצרים דומים, גם כשזה נראה סביר.
 
-── מקור הידע: מסמך אחד בלבד ──
-בסוף ההודעה הזו מופיע מסמך הידע של CodeKeeper. הוא המקור היחיד שלך לעובדות על המוצר: יכולות, מחירים, מגבלות, התקנה. אל תשלים מידע על Ck מהידע הכללי שלך על מוצרים דומים, גם כשההשלמה נראית סבירה — גולש שיסתמך על יכולת שלא קיימת ייפגע, והאמון במוצר ייפגע איתו. ידע כללי מותר רק כדי להסביר מושגים (למשל מה זה MCP), לא כדי לטעון טענות על Ck.
+── איך לנהל את השיחה (כללים לסוכן) ──
+
+- **שיחה, לא הרצאה:** אל תשפוך על המשתמש את כל המסמך בהודעה הראשונה. תתחיל מלהבין במשפט או שניים איך הוא עובד היום עם סוכני קוד ומה כואב לו.
+- **התאם את הדוגמה למשתמש:** אם הוא מתלונן שהסוכן חוזר על אותן טעויות עיצוב או קוד — תן לו בקצרה את דוגמת דריסת הצבע. אם הוא בונה מערכת מורכבת לאורך זמן — תן לו את דוגמת מסמך ה-MCP או האנלוגיה של התיק הרפואי.
+- **תן תשובה כנה וחותכת:** ברגע שהבנת את אופי העבודה שלו, תגיד לו בבירור אחד משלושה דברים:
+  1. **"זה תפור עליך"** — והסבר בדיוק איזה כאב זה יפתור לו ואיך להתחיל ממסמך אחד בסוף הסשן הבא שלו.
+  2. **"תיקיית `docs/` בריפו תספיק לך כרגע"** — אם הוא עובד לבד בריפו אחד רק מול Claude Code ולא צריך גישה מצ'אט, קריאה לפי סעיפים או היסטוריית גרסאות נפרדת.
+  3. **"אתה לא צריך מסמכי נושא כבדים, אבל יכול להיעזר בפתקים ושמירת קבצים"** — אם הפרויקטים שלו קטנים יחסית, אבל הוא מחפש דרך נוחה להעביר משימות, פתקים וקטעי קוד בין Claude.ai (למשל מהנייד) לבין Claude Code.
 
 ── כשאין תשובה במסמך, או כשהגולש רוצה לדבר עם המפתח ──
 אם התשובה לא נמצאת במסמך, או שהגולש מבקש לדבר עם אדם או עם המפתח, פתח את התשובה בדיוק במחרוזת {CONTACT_MARKER} (כולל הסוגריים המרובעים, בשורה משלה). אחריה כתוב משפט או שניים: מה כן ידוע מהמסמך אם יש משהו רלוונטי, ושאפשר לפנות ישירות למפתח. אל תכתוב קישור או שם משתמש — כפתור יצירת קשר מצורף להודעה אוטומטית. אל תכתוב את {CONTACT_MARKER} בשום מצב אחר.
@@ -385,8 +389,6 @@ def build_system_prompt(knowledge: str, follow_up_enabled: bool = FOLLOW_UP_ENAB
 ── סגנון ──
 - דבר תמיד על עצמך בלשון זכר ("אני יכול", "אשמח לעזור"), לעולם לא בלשון נקבה.
 - ענה באותה שפה שבה הגולש כותב.
-- הגולשים קוראים בטלפון: עד שלוש פסקאות קצרות, אלא אם ביקשו פירוט.
-- אם שואלים אם אתה בוט — אתה העוזר הדיגיטלי של CodeKeeper, שעונה מתוך התיעוד של המוצר.
 - שאלות שאינן קשורות ל-CodeKeeper או לאופן העבודה של הגולש — הפנה בעדינות חזרה לנושא.
 
 ── מסמך הידע ──
@@ -906,6 +908,10 @@ def split_message(text: str, limit: int = TELEGRAM_MAX_LENGTH) -> list[str]:
 
 `callback_data` של כפתור מוגבל ל-64 בתים, אז טקסט השאלה נשמר ב-`bot_data` והכפתור נושא רק מפתח. כפתורים שלא נלחצו נמחקים אחרי שעה. הרישום במגבלת הקצב קורה רק אחרי שווידאנו שהשאלה עוד קיימת — לחיצה על כפתור שפג לא אוכלת מכסה.
 
+### הפתיחה נשמרת בזיכרון
+
+הודעת הפתיחה שואלת את הגולש באילו סוכנים הוא משתמש ואם הם שוכחים החלטות. אם היא לא נשמרת, התשובה הראשונה שלו ("כן, כל הזמן") מגיעה ל-AI בלי השאלה שהיא עונה עליה. לכן `/start` נשמר בהיסטוריה יחד עם הפתיחה, כזוג שאלה-תשובה רגיל, ותחת אותו מנעול של הגולש: הודעה שנשלחת מיד אחרי `/start` רואה את הפתיחה.
+
 **`handlers.py`**
 
 ```python
@@ -938,9 +944,10 @@ from telegram_format import html_to_plain, sanitize_telegram_html, split_message
 logger = logging.getLogger(__name__)
 
 WELCOME_TEXT = (
-    "היי! 👋 אני היועץ של <b>CodeKeeper</b>.\n\n"
-    "ספרו לי איך אתם עובדים — עם אילו כלים, מאיזה מכשיר, מה מעצבן אתכם היום — "
-    "ואגיד לכם בכנות אם ואיך Ck יכול לעזור.\n\n"
+    "היי! אני כאן כדי לעזור לך לבדוק בכנות אם CodeKeeper באמת מתאים לאיך שאתה עובד עם סוכני AI, "
+    "או שאולי פתרון פשוט יותר יספיק לך. כדי שלא אשפוך עליך סתם מידע, בוא נתחיל מאיך אתה עובד היום: "
+    "באילו סוכנים אתה משתמש (Claude Code, צ'אט בדפדפן), "
+    "והאם קורה לך הרבה שהם שוכחים החלטות ארכיטקטורה ישנות וחוזרים על טעויות?\n\n"
     f"<i>כדי שאזכור את ההקשר, השיחה נשמרת אצלי {HISTORY_RETENTION_DAYS} ימים ואז נמחקת.</i>"
 )
 
@@ -1035,6 +1042,11 @@ def _build_follow_up_keyboard(questions: list[str], bot_data: dict, user_id: str
 # ─── הצינור היחיד ל-AI ───────────────────────────────────────────────────────
 
 
+def _user_lock(context: ContextTypes.DEFAULT_TYPE) -> asyncio.Lock:
+    """מנעול לכל גולש — כל מה שקורא או כותב את ההיסטוריה שלו עובר דרכו, אחד-אחד."""
+    return context.user_data.setdefault("answer_lock", asyncio.Lock())
+
+
 async def _answer_and_reply(context: ContextTypes.DEFAULT_TYPE, *, user_id: str, chat_id: int, text: str) -> None:
     """היסטוריה ← AI ← שליחה ← שמירה ← שאלות המשך.
 
@@ -1043,8 +1055,7 @@ async def _answer_and_reply(context: ContextTypes.DEFAULT_TYPE, *, user_id: str,
     שתי הודעות מהירות היו קוראות את אותה היסטוריה, והתשובות היו מגיעות
     בסדר אקראי.
     """
-    lock = context.user_data.setdefault("answer_lock", asyncio.Lock())
-    async with lock:
+    async with _user_lock(context):
         async with _typing_indicator(context.bot, chat_id):
             try:
                 history = await asyncio.to_thread(get_history, user_id, CONTEXT_WINDOW_SIZE)
@@ -1079,7 +1090,19 @@ async def _answer_and_reply(context: ContextTypes.DEFAULT_TYPE, *, user_id: str,
 
 @rate_limit_guard
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(WELCOME_TEXT, parse_mode=ParseMode.HTML)
+    """הפתיחה נשמרת בהיסטוריה כמו כל זוג שאלה-תשובה.
+
+    היא שואלת את הגולש שאלות, ובלעדיה בהיסטוריה התשובה הראשונה שלו ("כן, כל
+    הזמן") הייתה מגיעה ל-AI בלי השאלה שהיא עונה עליה. תחת אותו מנעול כמו
+    _answer_and_reply, כדי שהודעה שנשלחת מיד אחרי /start תראה את הפתיחה.
+    """
+    user_id = str(update.effective_user.id)
+    async with _user_lock(context):
+        await update.message.reply_text(WELCOME_TEXT, parse_mode=ParseMode.HTML)
+        try:
+            await asyncio.to_thread(save_exchange, user_id, update.message.text, WELCOME_TEXT)
+        except sqlite3.Error:
+            logger.exception("Failed to save welcome for user %s", user_id)
 
 
 @rate_limit_guard
@@ -1261,7 +1284,7 @@ if __name__ == "__main__":
 
 ## 9. טסטים
 
-38 טסטים, בלי רשת: OpenAI מוחלף ב-client מזויף שמחזיר אובייקטי `ChatCompletion` אמיתיים של ה-SDK, וטלגרם מוחלף ב-`FakeBot`. כל טסט מקבל DB זמני משלו.
+40 טסטים, בלי רשת: OpenAI מוחלף ב-client מזויף שמחזיר אובייקטי `ChatCompletion` אמיתיים של ה-SDK, וטלגרם מוחלף ב-`FakeBot`. כל טסט מקבל DB זמני משלו.
 
 **כל טסט הוכח כמסוגל להיכשל.** שברתי את הקוד בכוונה בכל נקודה רגישה וווידאתי שהטסט המתאים נופל:
 
@@ -1281,6 +1304,8 @@ if __name__ == "__main__":
 | ניתוב בלי `filters.UpdateType.MESSAGE` (כמו במקור) | `test_edited_message_reaches_no_handler` |
 | תו RLM בהערה בעברית | `test_no_bidi_controls_in_source` |
 | שינוי בקובץ קוד בלי אותו שינוי במדריך | `test_every_file_in_the_guide_matches_the_repo` |
+| `/start` בלי שמירת הפתיחה בהיסטוריה | `test_start_saves_the_welcome_so_the_first_reply_has_its_question` |
+| `/start` בלי המנעול של הגולש | `test_message_right_after_start_sees_the_welcome` |
 
 לטסט ה-BiDi יש גם הוכחה שלא תוכננה: בכתיבה הראשונה שלו, ה-escapes נשמרו בקובץ כתווים עצמם, והטסט נפל על עצמו.
 
@@ -1597,6 +1622,60 @@ def test_contact_button_and_follow_ups(tmp_db, monkeypatch, fake_bot):
     asyncio.run(handlers._answer_and_reply(context, user_id="u1", chat_id=1, text="שאלה"))
     cb = fake_bot.sent[-1]["reply_markup"].inline_keyboard[0][0].callback_data
     assert context.bot_data[cb] == "א?" and len(cb.encode()) <= 64
+
+
+def test_start_saves_the_welcome_so_the_first_reply_has_its_question(tmp_db, fake_bot):
+    """הפתיחה שואלת את הגולש שאלות — בלעדיה בהיסטוריה, התשובה שלו מגיעה ל-AI בלי השאלה."""
+    message = Message(
+        message_id=1,
+        date=dtm.datetime.now(dtm.timezone.utc),
+        chat=Chat(id=1, type="private"),
+        from_user=User(id=1, first_name="Dana", is_bot=False),
+        text="/start",
+    )
+    message.set_bot(fake_bot)
+    asyncio.run(handlers.start_command(Update(update_id=1, message=message), _context(fake_bot)))
+    assert fake_bot.sent[0]["text"] == handlers.WELCOME_TEXT
+    assert handlers.get_history("1", 10) == [
+        {"role": "user", "content": "/start"},
+        {"role": "assistant", "content": handlers.WELCOME_TEXT},
+    ]
+
+
+class _SlowBot(FakeBot):
+    async def send_message(self, **kwargs):
+        await asyncio.sleep(0.05)  # שליחה איטית: בלי המנעול, ההודעה הבאה קוראת היסטוריה לפני שהפתיחה נשמרה
+        return await super().send_message(**kwargs)
+
+
+def test_message_right_after_start_sees_the_welcome(tmp_db, monkeypatch):
+    """בדיקת מקביליות רצה במקביל: /start והודעה מיד אחריו — ה-AI חייב לראות את הפתיחה."""
+    seen_history = []
+
+    def fake_generate(history, text):
+        seen_history.append([m["content"] for m in history])
+        return llm.Answer(text="תשובה", ok=True)
+
+    monkeypatch.setattr(handlers, "generate_answer", fake_generate)
+    bot = _SlowBot()
+    context = _context(bot)
+    message = Message(
+        message_id=1,
+        date=dtm.datetime.now(dtm.timezone.utc),
+        chat=Chat(id=1, type="private"),
+        from_user=User(id=1, first_name="Dana", is_bot=False),
+        text="/start",
+    )
+    message.set_bot(bot)
+
+    async def main():
+        await asyncio.gather(
+            handlers.start_command(Update(update_id=1, message=message), context),
+            handlers._answer_and_reply(context, user_id="1", chat_id=1, text="כן, כל הזמן"),
+        )
+
+    asyncio.run(main())
+    assert seen_history == [["/start", handlers.WELCOME_TEXT]]
 
 
 def test_rejected_html_falls_back_to_clean_plain_text():
@@ -1982,7 +2061,7 @@ services:
 ## 12. מה אומת ומה לא
 
 **אומת:**
-- 38 טסטים עוברים, ו-14 שבירות מכוונות של הקוד נתפסו כל אחת בטסט שלה. לפני כל שבירה ריצת הבסיס עברה, והכשל אחריה היה ב-assert ולא בקריסה.
+- 40 טסטים עוברים, ו-16 שבירות מכוונות של הקוד נתפסו כל אחת בטסט שלה. לפני כל שבירה ריצת הבסיס עברה, והכשל אחריה היה ב-assert ולא בקריסה.
 - הרצה מקצה לקצה עם python-telegram-bot ו-openai האמיתיים, מול שרת Bot API מקומי ושרת OpenAI מקומי: הודעה ← חיווי הקלדה ← תשובה ב-HTML ← כפתורי שאלות המשך ← לחיצה ← תשובה עם כפתור יצירת קשר. הבקשה ל-OpenAI יצאה עם `max_completion_tokens` ובלי `temperature`, ההוראות בתפקיד `developer`, ובקריאה השנייה ההיסטוריה כללה את הזוג הראשון. הודעה בקבוצה לא הגיעה ל-AI. הודעה ערוכה, גם טקסט וגם `/start`, לא הגיעה לאף handler — לפני התיקון שתיהן הפילו `AttributeError`, והגולש קיבל "משהו השתבש".
 - הלוג של אותה הרצה: בלי הטוקן, בלי שם הגולש ובלי טקסט ההודעה. אותה הרצה בלי השורה שמשתיקה את `httpx`: הטוקן הופיע ב-17 שורות.
 - ולידציית ההגדרות: הרצה בלי טוקן, בלי מפתח, בלי מסמך ועם `CONTACT_URL` שגוי — ארבע שגיאות ברורות ויציאה עם קוד 1.

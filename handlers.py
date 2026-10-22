@@ -27,9 +27,10 @@ from telegram_format import html_to_plain, sanitize_telegram_html, split_message
 logger = logging.getLogger(__name__)
 
 WELCOME_TEXT = (
-    "היי! 👋 אני היועץ של <b>CodeKeeper</b>.\n\n"
-    "ספרו לי איך אתם עובדים — עם אילו כלים, מאיזה מכשיר, מה מעצבן אתכם היום — "
-    "ואגיד לכם בכנות אם ואיך Ck יכול לעזור.\n\n"
+    "היי! אני כאן כדי לעזור לך לבדוק בכנות אם CodeKeeper באמת מתאים לאיך שאתה עובד עם סוכני AI, "
+    "או שאולי פתרון פשוט יותר יספיק לך. כדי שלא אשפוך עליך סתם מידע, בוא נתחיל מאיך אתה עובד היום: "
+    "באילו סוכנים אתה משתמש (Claude Code, צ'אט בדפדפן), "
+    "והאם קורה לך הרבה שהם שוכחים החלטות ארכיטקטורה ישנות וחוזרים על טעויות?\n\n"
     f"<i>כדי שאזכור את ההקשר, השיחה נשמרת אצלי {HISTORY_RETENTION_DAYS} ימים ואז נמחקת.</i>"
 )
 
@@ -124,6 +125,11 @@ def _build_follow_up_keyboard(questions: list[str], bot_data: dict, user_id: str
 # ─── הצינור היחיד ל-AI ───────────────────────────────────────────────────────
 
 
+def _user_lock(context: ContextTypes.DEFAULT_TYPE) -> asyncio.Lock:
+    """מנעול לכל גולש — כל מה שקורא או כותב את ההיסטוריה שלו עובר דרכו, אחד-אחד."""
+    return context.user_data.setdefault("answer_lock", asyncio.Lock())
+
+
 async def _answer_and_reply(context: ContextTypes.DEFAULT_TYPE, *, user_id: str, chat_id: int, text: str) -> None:
     """היסטוריה ← AI ← שליחה ← שמירה ← שאלות המשך.
 
@@ -132,8 +138,7 @@ async def _answer_and_reply(context: ContextTypes.DEFAULT_TYPE, *, user_id: str,
     שתי הודעות מהירות היו קוראות את אותה היסטוריה, והתשובות היו מגיעות
     בסדר אקראי.
     """
-    lock = context.user_data.setdefault("answer_lock", asyncio.Lock())
-    async with lock:
+    async with _user_lock(context):
         async with _typing_indicator(context.bot, chat_id):
             try:
                 history = await asyncio.to_thread(get_history, user_id, CONTEXT_WINDOW_SIZE)
@@ -168,7 +173,19 @@ async def _answer_and_reply(context: ContextTypes.DEFAULT_TYPE, *, user_id: str,
 
 @rate_limit_guard
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(WELCOME_TEXT, parse_mode=ParseMode.HTML)
+    """הפתיחה נשמרת בהיסטוריה כמו כל זוג שאלה-תשובה.
+
+    היא שואלת את הגולש שאלות, ובלעדיה בהיסטוריה התשובה הראשונה שלו ("כן, כל
+    הזמן") הייתה מגיעה ל-AI בלי השאלה שהיא עונה עליה. תחת אותו מנעול כמו
+    _answer_and_reply, כדי שהודעה שנשלחת מיד אחרי /start תראה את הפתיחה.
+    """
+    user_id = str(update.effective_user.id)
+    async with _user_lock(context):
+        await update.message.reply_text(WELCOME_TEXT, parse_mode=ParseMode.HTML)
+        try:
+            await asyncio.to_thread(save_exchange, user_id, update.message.text, WELCOME_TEXT)
+        except sqlite3.Error:
+            logger.exception("Failed to save welcome for user %s", user_id)
 
 
 @rate_limit_guard
