@@ -46,7 +46,9 @@ def _bucket(user_id: str) -> deque[float]:
 
 def check_rate_limit(user_id: str) -> str | None:
     """הודעת חסימה אם המשתמש חרג, אחרת None. לא רושם — זה תפקיד record_message."""
-    now = time.time()
+    # שעון מונוטוני ולא שעון המערכת: שעון מערכת שזז קדימה היה מאפס את המכסה,
+    # ושזז אחורה היה שובר את הסדר העולה שה-bisect שלמטה מניח.
+    now = time.monotonic()
     timestamps = _bucket(user_id)
     while timestamps and timestamps[0] < now - 86400:
         timestamps.popleft()
@@ -61,7 +63,7 @@ def check_rate_limit(user_id: str) -> str | None:
 
 
 def record_message(user_id: str) -> None:
-    _bucket(user_id).append(time.time())
+    _bucket(user_id).append(time.monotonic())
 
 
 def rate_limit_guard(handler):

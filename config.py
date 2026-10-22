@@ -5,6 +5,7 @@
 ל-WhatsApp ול-multi-tenant.
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -73,9 +74,17 @@ def validate_config() -> list[str]:
     # בכל תשובה שמציגה את הכפתור, לא בעלייה.
     if CONTACT_URL and not CONTACT_URL.startswith(("https://", "http://", "tg://")):
         errors.append("CONTACT_URL חייב להתחיל ב-https:// או ב-tg://")
+    # הטווח לפי ה-SDK: "between 0 and 2". float() מקבל גם nan ו-inf, ו-OpenAI
+    # היה דוחה כל הודעה. מקור: openai/resources/chat/completions/completions.py
     if LLM_TEMPERATURE:
         try:
-            float(LLM_TEMPERATURE)
+            temperature = float(LLM_TEMPERATURE)
         except ValueError:
-            errors.append("LLM_TEMPERATURE חייב להיות מספר")
+            temperature = math.nan  # לא מספר — נדחה בבדיקה שבשורה הבאה
+        if not (math.isfinite(temperature) and 0 <= temperature <= 2):
+            errors.append("LLM_TEMPERATURE חייב להיות מספר בין 0 ל-2")
+    # ערך שלילי יוצר ב-SQLite את המשנה '--1 days', שמחזיר NULL: ההיסטוריה לא
+    # מוצגת וגם לא נמחקת לעולם — בניגוד למה שהבוט מבטיח לגולש ב-/start.
+    if HISTORY_RETENTION_DAYS < 0:
+        errors.append("HISTORY_RETENTION_DAYS לא יכול להיות שלילי")
     return errors

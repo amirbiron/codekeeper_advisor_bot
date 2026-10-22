@@ -170,6 +170,7 @@ __pycache__/
 ל-WhatsApp ול-multi-tenant.
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -238,11 +239,19 @@ def validate_config() -> list[str]:
     # בכל תשובה שמציגה את הכפתור, לא בעלייה.
     if CONTACT_URL and not CONTACT_URL.startswith(("https://", "http://", "tg://")):
         errors.append("CONTACT_URL חייב להתחיל ב-https:// או ב-tg://")
+    # הטווח לפי ה-SDK: "between 0 and 2". float() מקבל גם nan ו-inf, ו-OpenAI
+    # היה דוחה כל הודעה. מקור: openai/resources/chat/completions/completions.py
     if LLM_TEMPERATURE:
         try:
-            float(LLM_TEMPERATURE)
+            temperature = float(LLM_TEMPERATURE)
         except ValueError:
-            errors.append("LLM_TEMPERATURE חייב להיות מספר")
+            temperature = math.nan  # לא מספר — נדחה בבדיקה שבשורה הבאה
+        if not (math.isfinite(temperature) and 0 <= temperature <= 2):
+            errors.append("LLM_TEMPERATURE חייב להיות מספר בין 0 ל-2")
+    # ערך שלילי יוצר ב-SQLite את המשנה '--1 days', שמחזיר NULL: ההיסטוריה לא
+    # מוצגת וגם לא נמחקת לעולם — בניגוד למה שהבוט מבטיח לגולש ב-/start.
+    if HISTORY_RETENTION_DAYS < 0:
+        errors.append("HISTORY_RETENTION_DAYS לא יכול להיות שלילי")
     return errors
 ```
 
@@ -686,7 +695,7 @@ def purge_old_history() -> int:
 
 כמעט כמו המקור: שלושה חלונות זזים בזיכרון, ומחיקת המשתמש הכי ישן כשעוברים 10,000 משתמשים. המונים מתאפסים ב-restart — מקובל לבוט קטן.
 
-נקודה אחת עדינה, כי הבוט כאן מעבד עדכונים במקביל: בין הבדיקה לרישום אין `await`. ב-asyncio, רק `await` מוסר את השליטה לקוד אחר, ולכן שתי הודעות לא יכולות לעבור יחד את אותה בדיקה. הטסט `test_guard_holds_under_concurrent_updates` שולח 15 עדכונים בבת אחת ובודק שבדיוק 10 עוברים. הוספת `await asyncio.sleep(0)` בין השתיים מכשילה אותו.
+נקודה אחת עדינה, כי הבוט כאן מעבד עדכונים במקביל: בין הבדיקה לרישום אין `await`. ב-asyncio, רק `await` מוסר את השליטה לקוד אחר, ולכן שתי הודעות לא יכולות לעבור יחד את אותה בדיקה. הטסט `test_guard_holds_under_concurrent_updates` שולח בבת אחת עדכון אחד יותר מהמגבלה לדקה, ובודק שבדיוק המגבלה עוברת. הוספת `await asyncio.sleep(0)` בין השתיים מכשילה אותו.
 
 **`rate_limiter.py`**
 
@@ -739,7 +748,9 @@ def _bucket(user_id: str) -> deque[float]:
 
 def check_rate_limit(user_id: str) -> str | None:
     """הודעת חסימה אם המשתמש חרג, אחרת None. לא רושם — זה תפקיד record_message."""
-    now = time.time()
+    # שעון מונוטוני ולא שעון המערכת: שעון מערכת שזז קדימה היה מאפס את המכסה,
+    # ושזז אחורה היה שובר את הסדר העולה שה-bisect שלמטה מניח.
+    now = time.monotonic()
     timestamps = _bucket(user_id)
     while timestamps and timestamps[0] < now - 86400:
         timestamps.popleft()
@@ -754,7 +765,7 @@ def check_rate_limit(user_id: str) -> str | None:
 
 
 def record_message(user_id: str) -> None:
-    _bucket(user_id).append(time.time())
+    _bucket(user_id).append(time.monotonic())
 
 
 def rate_limit_guard(handler):
@@ -1820,7 +1831,7 @@ def test_minute_limit_blocks_the_eleventh_message():
 
 
 def test_guard_holds_under_concurrent_updates():
-    """בדיקת מקביליות רצה במקביל: 15 עדכונים בבת אחת ← בדיוק 10 עוברים."""
+    """בדיקת מקביליות רצה במקביל: עדכון אחד יותר מהמגבלה, בבת אחת ← בדיוק המגבלה עוברת."""
     ran = []
 
     @rate_limiter.rate_limit_guard
@@ -1829,7 +1840,7 @@ def test_guard_holds_under_concurrent_updates():
         ran.append(1)
 
     async def main():
-        await asyncio.gather(*(handler(_update(), None) for _ in range(15)))
+        await asyncio.gather(*(handler(_update(), None) for _ in range(rate_limiter.RATE_LIMIT_PER_MINUTE + 1)))
 
     asyncio.run(main())
     assert len(ran) == rate_limiter.RATE_LIMIT_PER_MINUTE

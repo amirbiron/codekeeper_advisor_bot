@@ -25,7 +25,7 @@ def test_minute_limit_blocks_the_eleventh_message():
 
 
 def test_guard_holds_under_concurrent_updates():
-    """בדיקת מקביליות רצה במקביל: 15 עדכונים בבת אחת ← בדיוק 10 עוברים."""
+    """בדיקת מקביליות רצה במקביל: עדכון אחד יותר מהמגבלה, בבת אחת ← בדיוק המגבלה עוברת."""
     ran = []
 
     @rate_limiter.rate_limit_guard
@@ -34,7 +34,7 @@ def test_guard_holds_under_concurrent_updates():
         ran.append(1)
 
     async def main():
-        await asyncio.gather(*(handler(_update(), None) for _ in range(15)))
+        await asyncio.gather(*(handler(_update(), None) for _ in range(rate_limiter.RATE_LIMIT_PER_MINUTE + 1)))
 
     asyncio.run(main())
     assert len(ran) == rate_limiter.RATE_LIMIT_PER_MINUTE
