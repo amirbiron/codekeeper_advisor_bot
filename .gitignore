@@ -1,0 +1,12 @@
+# סודות — הטוקן ומפתח OpenAI
+.env
+
+# היסטוריית השיחות (SQLite) — נתוני גולשים, לא קוד
+data/
+
+# סביבות ותוצרים
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
