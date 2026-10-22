@@ -22,14 +22,15 @@ from config import CONTACT_URL, CONTEXT_WINDOW_SIZE, HISTORY_RETENTION_DAYS
 from history import get_history, save_exchange
 from llm import generate_answer
 from rate_limiter import check_rate_limit, rate_limit_guard, record_message
-from telegram_format import html_to_plain, sanitize_telegram_html, split_message
+from telegram_format import html_to_plain, rtl_lines, sanitize_telegram_html, split_message
 
 logger = logging.getLogger(__name__)
 
 WELCOME_TEXT = (
     "היי! אני כאן כדי לעזור לך לבדוק בכנות אם CodeKeeper באמת מתאים לאיך שאתה עובד עם סוכני AI, "
-    "או שאולי פתרון פשוט יותר יספיק לך. כדי שלא אשפוך עליך סתם מידע, בוא נתחיל מאיך אתה עובד היום: "
-    "באילו סוכנים אתה משתמש (Claude Code, צ'אט בדפדפן), "
+    "או שאולי פתרון פשוט יותר יספיק לך.\n"
+    "כדי שלא אשפוך עליך סתם מידע, בוא נתחיל מאיך אתה עובד היום:\n"
+    "באילו סוכנים אתה משתמש (Claude Code, צ'אט בדפדפן)?\n"
     "והאם קורה לך הרבה שהם שוכחים החלטות ארכיטקטורה ישנות וחוזרים על טעויות?\n\n"
     f"<i>כדי שאזכור את ההקשר, השיחה נשמרת אצלי {HISTORY_RETENTION_DAYS} ימים ואז נמחקת.</i>"
 )
@@ -64,11 +65,12 @@ async def _typing_indicator(bot, chat_id: int, interval: float = 4.0):
 
 
 async def _send_text(bot, chat_id: int, text: str, reply_markup=None) -> None:
-    """שליחת תשובת AI: סניטציה ← פיצול ← HTML, ו-fallback לטקסט נקי.
+    """שליחת תשובת AI: סניטציה ← כיוון שורות ← פיצול ← HTML, ו-fallback לטקסט נקי.
 
     המקלדת מוצמדת רק לחלק האחרון, כך שהכפתור יופיע מתחת לסוף התשובה.
+    כיוון השורות לפני הפיצול, כדי שתקרת האורך תכלול את סימני ה-RLM שנוספו.
     """
-    chunks = split_message(sanitize_telegram_html(text))
+    chunks = split_message(rtl_lines(sanitize_telegram_html(text)))
     for i, chunk in enumerate(chunks):
         markup = reply_markup if i == len(chunks) - 1 else None
         try:
@@ -118,7 +120,7 @@ def _build_follow_up_keyboard(questions: list[str], bot_data: dict, user_id: str
     for i, q in enumerate(questions):
         cb_id = f"{FOLLOW_UP_CB_PREFIX}{user_id}_{now}_{i}"
         bot_data[cb_id] = q
-        buttons.append([InlineKeyboardButton(f"💡 {q}", callback_data=cb_id)])
+        buttons.append([InlineKeyboardButton(rtl_lines(f"💡 {q}"), callback_data=cb_id)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -220,7 +222,7 @@ async def follow_up_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     record_message(user_id)
     # הכפתורים נעלמים ובמקומם נשארת השאלה שנבחרה (טקסט רגיל, בלי parse_mode)
-    await query.edit_message_text(f"💡 {question}")
+    await query.edit_message_text(rtl_lines(f"💡 {question}"))
     await _answer_and_reply(context, user_id=user_id, chat_id=update.effective_chat.id, text=question)
 
 

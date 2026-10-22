@@ -1,5 +1,6 @@
 """
-הכנת טקסט לשליחה בטלגרם — סניטציית HTML, גרסת טקסט רגיל, ופיצול הודעות ארוכות.
+הכנת טקסט לשליחה בטלגרם — סניטציית HTML, גרסת טקסט רגיל, פיצול הודעות ארוכות
+וכיוון שורות.
 
 מקור: llm.sanitize_telegram_html בריפו ai-business-bot (כמו שהוא).
 שני חדשים, שסוגרים חורים שקיימים במקור:
@@ -7,10 +8,12 @@
   והגולש ראה תגים ו-&amp; כטקסט. כאן ה-fallback הוא טקסט נקי באמת.
 - split_message: טלגרם דוחה הודעה מעל 4096 תווים. במקור אין פיצול, ותשובה
   ארוכה נכשלת כולה.
+ובנוסף rtl_lines: שורה עברית שמתחילה במילה באנגלית מוצגת בטלגרם משמאל לימין.
 """
 
 import html as _html
 import re
+import unicodedata
 
 # Bot API: עד 4096 תווים להודעה.
 # מקור: telegram/constants.py, MessageLimit.MAX_TEXT_LENGTH
@@ -51,6 +54,45 @@ def sanitize_telegram_html(text: str) -> str:
 def html_to_plain(sanitized: str) -> str:
     """ההפך מ-sanitize: בלי תגים, עם תווים אמיתיים במקום &lt; / &amp;."""
     return _html.unescape(_TAG_RE.sub("", sanitized))
+
+
+# RIGHT-TO-LEFT MARK: תו בלתי נראה מסוג R — "אות" מימין לשמאל שאינה מוצגת
+RLM = "\u200f"
+
+# שורות בתוך <pre> הן קוד: תו נסתר שם נכנס למה שהגולש מעתיק
+_PRE_TAG_RE = re.compile(r"</?pre>")
+_STRONG = ("L", "R", "AL")
+
+
+def _starts_ltr_in_rtl_line(visible: str) -> bool:
+    """האות החזקה הראשונה משמאל לימין, ויש בשורה גם אות מימין לשמאל."""
+    classes = [unicodedata.bidirectional(ch) for ch in visible]
+    first_strong = next((c for c in classes if c in _STRONG), None)
+    return first_strong == "L" and any(c in ("R", "AL") for c in classes)
+
+
+def rtl_lines(text: str) -> str:
+    """RLM בתחילת כל שורה עברית שהאות הראשונה בה באנגלית.
+
+    טלגרם קובע את הכיוון של כל שורה לפי האות החזקה הראשונה בה — כל שורה היא
+    פסקה, והכיוון שלה נקבע לפי התו הראשון מסוג L, R או AL. שורה כמו
+    "CodeKeeper עוזר למפתחים" מוצגת לכן משמאל לימין, והסדר בה מתבלבל.
+    תבליט, אימוג'י ומספר אינם אותיות חזקות, ולכן "• CodeKeeper ..." נשברת גם היא.
+    מקור: https://www.unicode.org/reports/tr9/#P2 (כללים P1-P3)
+
+    הבדיקה על הטקסט הגלוי, בלי תגים — <b> לא מוצג, ולכן אינו קובע כיוון.
+    שורה שמתחילה כבר ב-RLM לא מקבלת עוד אחד, ושורות בתוך <pre> לא משתנות.
+    """
+    out = []
+    in_pre = False
+    for line in text.split("\n"):
+        starts_in_code = in_pre or line.lstrip().startswith("<pre>")
+        for tag in _PRE_TAG_RE.findall(line):
+            in_pre = tag == "<pre>"
+        if not starts_in_code and _starts_ltr_in_rtl_line(html_to_plain(line)):
+            line = RLM + line
+        out.append(line)
+    return "\n".join(out)
 
 
 def split_message(text: str, limit: int = TELEGRAM_MAX_LENGTH) -> list[str]:
