@@ -1,7 +1,7 @@
 # מדריך מימוש: בוט "יועץ CodeKeeper" לטלגרם
 
 ::: abstract
-בוט טלגרם שעונה לגולשים ששוקלים את CodeKeeper על השאלה אחת שמעניינת אותם: "זה יתאים לאופן שבו אני עובד?". הוא עונה מתוך מסמך ידע אחד, זוכר את רצף השיחה, ואין לו פאנל ניהול. הקוד חולץ מהריפו `ai-business-bot`, צומצם למה שהבוט הזה צריך, ותוקנו בו שישה באגים שקיימים במקור. כל קובץ במדריך הוא קוד שרץ: 35 טסטים עוברים, כל טסט הוכח כמסוגל להיכשל, והזרימה המלאה הורצה עם הספריות האמיתיות של OpenAI וטלגרם מול שרתים מקומיים.
+בוט טלגרם שעונה לגולשים ששוקלים את CodeKeeper על השאלה אחת שמעניינת אותם: "זה יתאים לאופן שבו אני עובד?". הוא עונה מתוך מסמך ידע אחד, זוכר את רצף השיחה, ואין לו פאנל ניהול. הקוד חולץ מהריפו `ai-business-bot`, צומצם למה שהבוט הזה צריך, ותוקנו בו שבעה באגים שקיימים במקור. כל קובץ במדריך הוא קוד שרץ, וטסט מוודא שהוא זהה לקובץ בריפו: 38 טסטים עוברים, כל טסט הוכח כמסוגל להיכשל, והזרימה המלאה הורצה עם הספריות האמיתיות של OpenAI וטלגרם מול שרתים מקומיים.
 :::
 
 **נבדק מול:** python-telegram-bot 22.8, openai 3.36.1, Python 3.13 — אוקטובר 2026. הגרסאות נעוצות ב-`requirements.txt`.
@@ -64,9 +64,14 @@ codekeeper-advisor-bot/
 ├── knowledge/
 │   └── codekeeper.md    ← מסמך הידע
 ├── tests/
+├── docs/
+│   └── codekeeper_advisor_bot_guide.md   ← המדריך הזה
 ├── requirements.txt
 ├── pytest.ini
-└── .env.example
+├── .env.example
+├── .gitignore
+├── render.yaml          ← פריסה ל-Render: עובד רקע + דיסק קבוע
+└── CLAUDE.md            ← הנחיות לסשנים של Claude Code
 ```
 
 | קובץ | מאיפה בריפו `ai-business-bot` | מה השתנה |
@@ -128,6 +133,25 @@ pythonpath = .
 testpaths = tests
 ```
 
+שני דברים לא נכנסים לגיט: `.env` עם הטוקן והמפתח, ו-`data/` עם היסטוריית השיחות של הגולשים.
+
+**`.gitignore`**
+
+```gitignore
+# סודות — הטוקן ומפתח OpenAI
+.env
+
+# היסטוריית השיחות (SQLite) — נתוני גולשים, לא קוד
+data/
+
+# סביבות ותוצרים
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+```
+
 ---
 
 ## 2. `config.py`
@@ -146,6 +170,7 @@ testpaths = tests
 ל-WhatsApp ול-multi-tenant.
 """
 
+import math
 import os
 from pathlib import Path
 
@@ -214,11 +239,19 @@ def validate_config() -> list[str]:
     # בכל תשובה שמציגה את הכפתור, לא בעלייה.
     if CONTACT_URL and not CONTACT_URL.startswith(("https://", "http://", "tg://")):
         errors.append("CONTACT_URL חייב להתחיל ב-https:// או ב-tg://")
+    # הטווח לפי ה-SDK: "between 0 and 2". float() מקבל גם nan ו-inf, ו-OpenAI
+    # היה דוחה כל הודעה. מקור: openai/resources/chat/completions/completions.py
     if LLM_TEMPERATURE:
         try:
-            float(LLM_TEMPERATURE)
+            temperature = float(LLM_TEMPERATURE)
         except ValueError:
-            errors.append("LLM_TEMPERATURE חייב להיות מספר")
+            temperature = math.nan  # לא מספר — נדחה בבדיקה שבשורה הבאה
+        if not (math.isfinite(temperature) and 0 <= temperature <= 2):
+            errors.append("LLM_TEMPERATURE חייב להיות מספר בין 0 ל-2")
+    # ערך שלילי יוצר ב-SQLite את המשנה '--1 days', שמחזיר NULL: ההיסטוריה לא
+    # מוצגת וגם לא נמחקת לעולם — בניגוד למה שהבוט מבטיח לגולש ב-/start.
+    if HISTORY_RETENTION_DAYS < 0:
+        errors.append("HISTORY_RETENTION_DAYS לא יכול להיות שלילי")
     return errors
 ```
 
@@ -662,7 +695,7 @@ def purge_old_history() -> int:
 
 כמעט כמו המקור: שלושה חלונות זזים בזיכרון, ומחיקת המשתמש הכי ישן כשעוברים 10,000 משתמשים. המונים מתאפסים ב-restart — מקובל לבוט קטן.
 
-נקודה אחת עדינה, כי הבוט כאן מעבד עדכונים במקביל: בין הבדיקה לרישום אין `await`. ב-asyncio, רק `await` מוסר את השליטה לקוד אחר, ולכן שתי הודעות לא יכולות לעבור יחד את אותה בדיקה. הטסט `test_guard_holds_under_concurrent_updates` שולח 15 עדכונים בבת אחת ובודק שבדיוק 10 עוברים. הוספת `await asyncio.sleep(0)` בין השתיים מכשילה אותו.
+נקודה אחת עדינה, כי הבוט כאן מעבד עדכונים במקביל: בין הבדיקה לרישום אין `await`. ב-asyncio, רק `await` מוסר את השליטה לקוד אחר, ולכן שתי הודעות לא יכולות לעבור יחד את אותה בדיקה. הטסט `test_guard_holds_under_concurrent_updates` שולח בבת אחת עדכון אחד יותר מהמגבלה לדקה, ובודק שבדיוק המגבלה עוברת. הוספת `await asyncio.sleep(0)` בין השתיים מכשילה אותו.
 
 **`rate_limiter.py`**
 
@@ -715,7 +748,9 @@ def _bucket(user_id: str) -> deque[float]:
 
 def check_rate_limit(user_id: str) -> str | None:
     """הודעת חסימה אם המשתמש חרג, אחרת None. לא רושם — זה תפקיד record_message."""
-    now = time.time()
+    # שעון מונוטוני ולא שעון המערכת: שעון מערכת שזז קדימה היה מאפס את המכסה,
+    # ושזז אחורה היה שובר את הסדר העולה שה-bisect שלמטה מניח.
+    now = time.monotonic()
     timestamps = _bucket(user_id)
     while timestamps and timestamps[0] < now - 86400:
         timestamps.popleft()
@@ -730,7 +765,7 @@ def check_rate_limit(user_id: str) -> str | None:
 
 
 def record_message(user_id: str) -> None:
-    _bucket(user_id).append(time.time())
+    _bucket(user_id).append(time.monotonic())
 
 
 def rate_limit_guard(handler):
@@ -927,6 +962,7 @@ async def _typing_indicator(bot, chat_id: int, interval: float = 4.0):
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
             except asyncio.TimeoutError:
+                # לא כשל: עברו interval שניות והבלוק עוד רץ — זה המסלול הרגיל לחיווי הבא
                 pass
 
     task = asyncio.create_task(_loop())
@@ -979,6 +1015,7 @@ def _cleanup_stale_follow_ups(bot_data: dict) -> None:
             if now - int(key.split("_")[-2]) > _FOLLOW_UP_TTL_SECONDS:
                 stale_keys.append(key)
         except (ValueError, IndexError):
+            # מפתח עם הקידומת שלא בנוי לפי המבנה — לא נוצר כאן, ולכן לא שלנו למחוק
             continue
     for key in stale_keys:
         bot_data.pop(key, None)
@@ -1106,6 +1143,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 **בלי `drop_pending_updates`.** במקור הודעות שהגיעו בזמן deploy נזרקות. כאן גולש שכתב בדיוק באותו רגע מקבל תשובה כשהבוט עולה.
 
+**הודעה ערוכה לא מגיעה ל-handlers.** `CommandHandler` מאזין כברירת מחדל גם להודעות ערוכות ("listens to messages as well as edited messages", בקוד הספרייה), ו-`filters.TEXT` בודק את `effective_message`, שכולל גם אותן. שני ה-handlers קוראים את `update.message`, שהוא `None` בעריכה. בהרצה מול שרת טלגרם מקומי: גולש שערך הודעה קיבל "משהו השתבש", ובלוג נרשם `AttributeError`. אותו רישום קיים במקור: `message_handler` ב-`bot/handlers.py` קורא `update.message.text` ונרשם עם `filters.TEXT & ~filters.COMMAND`. כאן שני ה-handlers נרשמים עם `filters.UpdateType.MESSAGE`, ועריכה לא נענית: תשובה שנייה לאותה שאלה הייתה עולה עוד קריאת AI.
+
 **`main.py`**
 
 ```python
@@ -1186,7 +1225,12 @@ def build_application(token: str, base_url: str | None = None) -> Application:
         builder = builder.base_url(base_url)
     app = builder.build()
 
-    private = filters.ChatType.PRIVATE  # יועץ אישי — לא עונה בקבוצות
+    # יועץ אישי — לא עונה בקבוצות. ורק הודעות חדשות: CommandHandler ו-filters.TEXT
+    # מקבלים גם הודעה ערוכה (שניהם בודקים את effective_message), ושני ה-handlers
+    # קוראים את update.message — שהוא None בעריכה, ולכן עריכה הייתה מפילה אותם.
+    # מקור: telegram/ext/_handlers/commandhandler.py ("listens to messages as well
+    # as edited messages"), telegram/ext/filters.py (UpdateType.MESSAGE: update.message is not None)
+    private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
     app.add_handler(CommandHandler(["start", "help"], start_command, filters=private))
     app.add_handler(CallbackQueryHandler(follow_up_callback, pattern=rf"^{re.escape(FOLLOW_UP_CB_PREFIX)}"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & private, message_handler))
@@ -1217,7 +1261,7 @@ if __name__ == "__main__":
 
 ## 9. טסטים
 
-35 טסטים, בלי רשת: OpenAI מוחלף ב-client מזויף שמחזיר אובייקטי `ChatCompletion` אמיתיים של ה-SDK, וטלגרם מוחלף ב-`FakeBot`. כל טסט מקבל DB זמני משלו.
+38 טסטים, בלי רשת: OpenAI מוחלף ב-client מזויף שמחזיר אובייקטי `ChatCompletion` אמיתיים של ה-SDK, וטלגרם מוחלף ב-`FakeBot`. כל טסט מקבל DB זמני משלו.
 
 **כל טסט הוכח כמסוגל להיכשל.** שברתי את הקוד בכוונה בכל נקודה רגישה וווידאתי שהטסט המתאים נופל:
 
@@ -1234,6 +1278,11 @@ if __name__ == "__main__":
 | `temperature` שנשלח תמיד | אותו טסט |
 | זנב התשובה בלוג (כמו במקור) | `test_diag_log_has_numbers_but_no_content` |
 | הטוקן לא מוסר מאמצע התשובה | `test_contact_marker_detected_only_at_start_but_removed_everywhere` |
+| ניתוב בלי `filters.UpdateType.MESSAGE` (כמו במקור) | `test_edited_message_reaches_no_handler` |
+| תו RLM בהערה בעברית | `test_no_bidi_controls_in_source` |
+| שינוי בקובץ קוד בלי אותו שינוי במדריך | `test_every_file_in_the_guide_matches_the_repo` |
+
+לטסט ה-BiDi יש גם הוכחה שלא תוכננה: בכתיבה הראשונה שלו, ה-escapes נשמרו בקובץ כתווים עצמם, והטסט נפל על עצמו.
 
 הרצה:
 
@@ -1493,7 +1542,7 @@ import datetime as dtm
 import time
 from types import SimpleNamespace
 
-from telegram import Chat, Message, Update, User
+from telegram import Chat, Message, MessageEntity, Update, User
 
 import handlers
 import llm
@@ -1580,6 +1629,120 @@ def test_error_handler_does_not_log_user_content(caplog, fake_bot):
     for secret in ("Dana", "dana_x", "0501234567"):
         assert secret not in caplog.text
     assert fake_bot.sent  # הגולש קיבל הודעת תקלה
+
+
+def test_edited_message_reaches_no_handler():
+    """הודעה ערוכה לא מגיעה לאף handler: שניהם קוראים update.message, שהוא None בעריכה.
+
+    עובר דרך הניתוב האמיתי של build_application — כך האפליקציה בוחרת handler לכל עדכון.
+    """
+    import main  # בתוך הטסט: מודול הכניסה מגדיר logging כבר בייבוא
+
+    app = main.build_application("123:TEST")
+    routes = [h for group in app.handlers.values() for h in group]
+    bot = SimpleNamespace(username="advisor_bot")  # CommandHandler משווה את הפקודה לשם הבוט
+
+    for text, handler in (("שאלה", handlers.message_handler), ("/start", handlers.start_command)):
+        entities = [MessageEntity(type=MessageEntity.BOT_COMMAND, offset=0, length=6)] if text == "/start" else None
+        message = Message(
+            message_id=5,
+            date=dtm.datetime.now(dtm.timezone.utc),
+            chat=Chat(id=1, type="private"),
+            from_user=User(id=1, first_name="Dana", is_bot=False),
+            text=text,
+            entities=entities,
+        )
+        message.set_bot(bot)
+        new = Update(update_id=1, message=message)
+        edited = Update(update_id=2, edited_message=message)
+        assert [h.callback for h in routes if h.check_update(new)] == [handler]
+        assert [h.callback for h in routes if h.check_update(edited)] == []
+```
+
+:::
+
+::: details tests/test_no_bidi.py + tests/test_guide_sync.py
+
+**`tests/test_no_bidi.py`**
+
+```python
+"""אין תווי BiDi בקבצי הקוד.
+
+הם נכנסים להערות בעברית בהעתקה מדפדפן או מצ'אט, לא נראים בשום עורך, ומפילים
+לינטרים (bandit B613, ruff PLE2502). מקור הכלל: amir-bug-patterns,
+BY-STACK/hebrew-source.md H1.
+"""
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# ה-escapes מכוונים: התווים עצמם בקובץ הזה היו מפילים את הבדיקה על עצמה
+BIDI = ("\u200e", "\u200f", "\u202a", "\u202b", "\u202c",
+        "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069")
+
+# סביבות וירטואליות ותיקיות נסתרות (.git, .venv) אינן קוד שלנו
+_SKIP_DIRS = {"venv", "env", "__pycache__"}
+
+
+def _source_files() -> list[Path]:
+    return [
+        path for path in ROOT.rglob("*.py")
+        if not any(part.startswith(".") or part in _SKIP_DIRS for part in path.relative_to(ROOT).parts[:-1])
+    ]
+
+
+def test_no_bidi_controls_in_source():
+    files = _source_files()
+    assert files  # סריקה שלא מצאה קבצים הייתה עוברת על כל דבר
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for char in BIDI:
+            assert char not in text, f"{path.relative_to(ROOT)}: תו BiDi {char!r}"
+```
+
+**`tests/test_guide_sync.py`**
+
+```python
+"""המדריך ב-docs/ מכיל עותק מלא של קבצי הפרויקט — והטסט שומר ששני העותקים זהים.
+
+הטענה המרכזית של המדריך היא שכל קובץ בו הוא קוד שרץ ונבדק. בלי הטסט, שינוי
+בקוד בלי אותו שינוי במדריך (או להפך) היה הופך את הטענה לשקרית בשקט.
+"""
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+GUIDE = ROOT / "docs" / "codekeeper_advisor_bot_guide.md"
+
+# כותרת קובץ במדריך: שורה שכולה **`path`**, ואחריה בלוק קוד
+_HEADER = re.compile(r"^\*\*`([^`]+)`\*\*$")
+
+
+def _guide_files() -> dict[str, str]:
+    lines = GUIDE.read_text(encoding="utf-8").splitlines()
+    files: dict[str, str] = {}
+    i = 0
+    while i < len(lines):
+        match = _HEADER.match(lines[i])
+        if not match:
+            i += 1
+            continue
+        start = next(j for j in range(i + 1, len(lines)) if lines[j].startswith("```")) + 1
+        end = next(j for j in range(start, len(lines)) if lines[j] == "```")
+        path = match.group(1)
+        assert path not in files, f"{path} מופיע פעמיים במדריך"
+        files[path] = "\n".join(lines[start:end]) + "\n"
+        i = end + 1
+    return files
+
+
+def test_every_file_in_the_guide_matches_the_repo():
+    files = _guide_files()
+    assert files  # פענוח שלא מצא אף קובץ היה עובר על כל דבר
+    for path, body in files.items():
+        assert (ROOT / path).read_text(encoding="utf-8") == body, f"{path}: הקוד במדריך שונה מהקובץ בריפו"
 ```
 
 :::
@@ -1668,7 +1831,7 @@ def test_minute_limit_blocks_the_eleventh_message():
 
 
 def test_guard_holds_under_concurrent_updates():
-    """בדיקת מקביליות רצה במקביל: 15 עדכונים בבת אחת ← בדיוק 10 עוברים."""
+    """בדיקת מקביליות רצה במקביל: עדכון אחד יותר מהמגבלה, בבת אחת ← בדיוק המגבלה עוברת."""
     ran = []
 
     @rate_limiter.rate_limit_guard
@@ -1677,7 +1840,7 @@ def test_guard_holds_under_concurrent_updates():
         ran.append(1)
 
     async def main():
-        await asyncio.gather(*(handler(_update(), None) for _ in range(15)))
+        await asyncio.gather(*(handler(_update(), None) for _ in range(rate_limiter.RATE_LIMIT_PER_MINUTE + 1)))
 
     asyncio.run(main())
     assert len(ran) == rate_limiter.RATE_LIMIT_PER_MINUTE
@@ -1756,6 +1919,50 @@ python main.py
 שני מופעים של הבוט עם אותו טוקן במצב polling מתנגשים — הספרייה זורקת `telegram.error.Conflict` ("a long poll or webhook conflicts with another one"). בזמן deploy, ודאו שהמופע הישן נעצר לפני שהחדש עולה.
 :::
 
+**ב-Render:** `render.yaml` מגדיר את הבוט כעובד רקע עם דיסק קבוע, והדיסק פותר את שתי הבעיות שלמעלה. ה-SQLite נשמר בין deploys, ו-Render עוצר את המופע הישן לפני שהחדש עולה, כי שירות עם דיסק לא מקבל zero-downtime deploy. בלי דיסק, המופע הישן מקבל `SIGTERM` רק 60 שניות אחרי שהחדש עלה, וכל הזמן הזה שניהם עושים polling. ב-`SIGTERM` הבוט נעצר נקי, כי `run_polling` מאזין לו כברירת מחדל. ביצירת ה-Blueprint, Render מבקש בדשבורד את הטוקן, את מפתח OpenAI ואת `CONTACT_URL`.
+
+**`render.yaml`**
+
+```yaml
+# Render Blueprint. מקור לכל השדות: https://render.com/docs/blueprint-spec
+services:
+  # עובד רקע ולא web: polling לא צריך כתובת ציבורית ולא פורט פתוח
+  - type: worker
+    name: codekeeper-advisor-bot
+    runtime: python
+    # התוכנית הקטנה ביותר לעובד רקע (0.5 CPU / 512MB). לעובד רקע אין free,
+    # ודיסק קבוע זמין רק בתוכנית בתשלום.
+    plan: 0.5c-512mb
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+
+    # SQLite של היסטוריית השיחות — בלי דיסק היא מתאפסת בכל deploy.
+    # ועוד דבר שהדיסק פותר: עם דיסק, Render עוצר את המופע הישן לפני שהחדש
+    # עולה. בלעדיו (zero-downtime) שני המופעים עושים polling במקביל כ-60
+    # שניות, וטלגרם דוחה את שניהם ב-Conflict.
+    # מקור: https://render.com/docs/disks, https://render.com/docs/deploys#zero-downtime-deploys
+    disk:
+      name: advisor-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      # הגרסה שהקוד נבדק מולה. בלי זה Render בוחר לשירות חדש את 3.14.
+      - key: PYTHON_VERSION
+        value: 3.13.16
+      # חייב להיות זהה ל-mountPath שלמעלה, אחרת ה-DB נכתב לדיסק הזמני
+      - key: DATA_DIR
+        value: /var/data
+      # Render מבקש את שלושת אלה בדשבורד, ביצירת ה-Blueprint בלבד
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # ריק = בלי כפתור "לדבר עם המפתח"
+      - key: CONTACT_URL
+        sync: false
+```
+
 ---
 
 ## 11. מה הושמט מהבוט העסקי, ולמה
@@ -1775,9 +1982,9 @@ python main.py
 ## 12. מה אומת ומה לא
 
 **אומת:**
-- 35 טסטים עוברים, ו-11 שבירות מכוונות של הקוד נתפסו כל אחת בטסט שלה.
-- הרצה מקצה לקצה עם python-telegram-bot ו-openai האמיתיים, מול שרת Bot API מקומי ושרת OpenAI מקומי: הודעה ← חיווי הקלדה ← תשובה ב-HTML ← כפתורי שאלות המשך ← לחיצה ← תשובה עם כפתור יצירת קשר. הבקשה ל-OpenAI יצאה עם `max_completion_tokens` ובלי `temperature`, ההוראות בתפקיד `developer`, ובקריאה השנייה ההיסטוריה כללה את הזוג הראשון. הודעה בקבוצה לא הגיעה ל-AI.
-- הלוג של אותה הרצה: בלי הטוקן, בלי שם הגולש ובלי טקסט ההודעה.
+- 38 טסטים עוברים, ו-14 שבירות מכוונות של הקוד נתפסו כל אחת בטסט שלה. לפני כל שבירה ריצת הבסיס עברה, והכשל אחריה היה ב-assert ולא בקריסה.
+- הרצה מקצה לקצה עם python-telegram-bot ו-openai האמיתיים, מול שרת Bot API מקומי ושרת OpenAI מקומי: הודעה ← חיווי הקלדה ← תשובה ב-HTML ← כפתורי שאלות המשך ← לחיצה ← תשובה עם כפתור יצירת קשר. הבקשה ל-OpenAI יצאה עם `max_completion_tokens` ובלי `temperature`, ההוראות בתפקיד `developer`, ובקריאה השנייה ההיסטוריה כללה את הזוג הראשון. הודעה בקבוצה לא הגיעה ל-AI. הודעה ערוכה, גם טקסט וגם `/start`, לא הגיעה לאף handler — לפני התיקון שתיהן הפילו `AttributeError`, והגולש קיבל "משהו השתבש".
+- הלוג של אותה הרצה: בלי הטוקן, בלי שם הגולש ובלי טקסט ההודעה. אותה הרצה בלי השורה שמשתיקה את `httpx`: הטוקן הופיע ב-17 שורות.
 - ולידציית ההגדרות: הרצה בלי טוקן, בלי מפתח, בלי מסמך ועם `CONTACT_URL` שגוי — ארבע שגיאות ברורות ויציאה עם קוד 1.
 
 **לא אומת:**
