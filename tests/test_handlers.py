@@ -60,6 +60,60 @@ def test_contact_button_and_follow_ups(tmp_db, monkeypatch, fake_bot):
     assert context.bot_data[cb] == "א?" and len(cb.encode()) <= 64
 
 
+def test_start_saves_the_welcome_so_the_first_reply_has_its_question(tmp_db, fake_bot):
+    """הפתיחה שואלת את הגולש שאלות — בלעדיה בהיסטוריה, התשובה שלו מגיעה ל-AI בלי השאלה."""
+    message = Message(
+        message_id=1,
+        date=dtm.datetime.now(dtm.timezone.utc),
+        chat=Chat(id=1, type="private"),
+        from_user=User(id=1, first_name="Dana", is_bot=False),
+        text="/start",
+    )
+    message.set_bot(fake_bot)
+    asyncio.run(handlers.start_command(Update(update_id=1, message=message), _context(fake_bot)))
+    assert fake_bot.sent[0]["text"] == handlers.WELCOME_TEXT
+    assert handlers.get_history("1", 10) == [
+        {"role": "user", "content": "/start"},
+        {"role": "assistant", "content": handlers.WELCOME_TEXT},
+    ]
+
+
+class _SlowBot(FakeBot):
+    async def send_message(self, **kwargs):
+        await asyncio.sleep(0.05)  # שליחה איטית: בלי המנעול, ההודעה הבאה קוראת היסטוריה לפני שהפתיחה נשמרה
+        return await super().send_message(**kwargs)
+
+
+def test_message_right_after_start_sees_the_welcome(tmp_db, monkeypatch):
+    """בדיקת מקביליות רצה במקביל: /start והודעה מיד אחריו — ה-AI חייב לראות את הפתיחה."""
+    seen_history = []
+
+    def fake_generate(history, text):
+        seen_history.append([m["content"] for m in history])
+        return llm.Answer(text="תשובה", ok=True)
+
+    monkeypatch.setattr(handlers, "generate_answer", fake_generate)
+    bot = _SlowBot()
+    context = _context(bot)
+    message = Message(
+        message_id=1,
+        date=dtm.datetime.now(dtm.timezone.utc),
+        chat=Chat(id=1, type="private"),
+        from_user=User(id=1, first_name="Dana", is_bot=False),
+        text="/start",
+    )
+    message.set_bot(bot)
+
+    async def main():
+        await asyncio.gather(
+            handlers.start_command(Update(update_id=1, message=message), context),
+            handlers._answer_and_reply(context, user_id="1", chat_id=1, text="כן, כל הזמן"),
+        )
+
+    asyncio.run(main())
+    assert seen_history == [["/start", handlers.WELCOME_TEXT]]
+
+
 def test_rejected_html_falls_back_to_clean_plain_text():
     bot = FakeBot(reject_html_containing="<b>")
     asyncio.run(handlers._send_text(bot, 1, "<b>כותרת</b> & עוד"))
