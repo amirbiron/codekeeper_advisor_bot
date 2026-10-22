@@ -20,6 +20,10 @@ python main.py
 python -m pytest -q
 ```
 
+## פריסה ל-Render
+
+`render.yaml` הוא Blueprint: הבוט רץ כעובד רקע עם דיסק קבוע להיסטוריית השיחות. ביצירת ה-Blueprint, Render מבקש בדשבורד את `TELEGRAM_BOT_TOKEN`, ‏`OPENAI_API_KEY` ו-`CONTACT_URL`.
+
 ## עדכון מסמך הידע
 
 עורכים את `knowledge/codekeeper.md`, ואז commit ו-deploy. המסמך נטען פעם אחת, בעליית הבוט.

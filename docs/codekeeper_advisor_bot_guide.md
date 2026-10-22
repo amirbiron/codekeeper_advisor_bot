@@ -70,6 +70,7 @@ codekeeper-advisor-bot/
 ├── pytest.ini
 ├── .env.example
 ├── .gitignore
+├── render.yaml          ← פריסה ל-Render: עובד רקע + דיסק קבוע
 └── CLAUDE.md            ← הנחיות לסשנים של Claude Code
 ```
 
@@ -1906,6 +1907,50 @@ python main.py
 ::: warning
 שני מופעים של הבוט עם אותו טוקן במצב polling מתנגשים — הספרייה זורקת `telegram.error.Conflict` ("a long poll or webhook conflicts with another one"). בזמן deploy, ודאו שהמופע הישן נעצר לפני שהחדש עולה.
 :::
+
+**ב-Render:** `render.yaml` מגדיר את הבוט כעובד רקע עם דיסק קבוע, והדיסק פותר את שתי הבעיות שלמעלה. ה-SQLite נשמר בין deploys, ו-Render עוצר את המופע הישן לפני שהחדש עולה, כי שירות עם דיסק לא מקבל zero-downtime deploy. בלי דיסק, המופע הישן מקבל `SIGTERM` רק 60 שניות אחרי שהחדש עלה, וכל הזמן הזה שניהם עושים polling. ב-`SIGTERM` הבוט נעצר נקי, כי `run_polling` מאזין לו כברירת מחדל. ביצירת ה-Blueprint, Render מבקש בדשבורד את הטוקן, את מפתח OpenAI ואת `CONTACT_URL`.
+
+**`render.yaml`**
+
+```yaml
+# Render Blueprint. מקור לכל השדות: https://render.com/docs/blueprint-spec
+services:
+  # עובד רקע ולא web: polling לא צריך כתובת ציבורית ולא פורט פתוח
+  - type: worker
+    name: codekeeper-advisor-bot
+    runtime: python
+    # התוכנית הקטנה ביותר לעובד רקע (0.5 CPU / 512MB). לעובד רקע אין free,
+    # ודיסק קבוע זמין רק בתוכנית בתשלום.
+    plan: 0.5c-512mb
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+
+    # SQLite של היסטוריית השיחות — בלי דיסק היא מתאפסת בכל deploy.
+    # ועוד דבר שהדיסק פותר: עם דיסק, Render עוצר את המופע הישן לפני שהחדש
+    # עולה. בלעדיו (zero-downtime) שני המופעים עושים polling במקביל כ-60
+    # שניות, וטלגרם דוחה את שניהם ב-Conflict.
+    # מקור: https://render.com/docs/disks, https://render.com/docs/deploys#zero-downtime-deploys
+    disk:
+      name: advisor-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      # הגרסה שהקוד נבדק מולה. בלי זה Render בוחר לשירות חדש את 3.14.
+      - key: PYTHON_VERSION
+        value: 3.13.16
+      # חייב להיות זהה ל-mountPath שלמעלה, אחרת ה-DB נכתב לדיסק הזמני
+      - key: DATA_DIR
+        value: /var/data
+      # Render מבקש את שלושת אלה בדשבורד, ביצירת ה-Blueprint בלבד
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # ריק = בלי כפתור "לדבר עם המפתח"
+      - key: CONTACT_URL
+        sync: false
+```
 
 ---
 
