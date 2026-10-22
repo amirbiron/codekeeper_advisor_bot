@@ -1,4 +1,4 @@
-from telegram_format import html_to_plain, sanitize_telegram_html, split_message
+from telegram_format import RLM, html_to_plain, rtl_lines, sanitize_telegram_html, split_message
 
 
 def test_sanitize_keeps_telegram_tags_and_escapes_the_rest():
@@ -36,3 +36,22 @@ def test_split_message_hard_cuts_a_single_huge_word():
 
 def test_short_message_is_one_chunk():
     assert split_message("  שלום  ") == ["שלום"]
+
+
+def test_rtl_mark_on_hebrew_lines_whose_first_letter_is_english():
+    lines = [
+        "CodeKeeper עוזר למפתחים",        # מתחילה באנגלית ← RLM
+        "• Claude Code עובד גם מהנייד",   # תבליט אינו אות ← RLM
+        "<b>CodeKeeper</b> שומר מסמכים",  # התג אינו מוצג ← RLM
+        "המסמך נגיש מ-Claude Code",        # מתחילה בעברית ← בלי
+        "<b>שמירה</b> עם CodeKeeper",      # האות הגלויה הראשונה בעברית ← בלי
+        "Claude Code",                      # בלי עברית ← בלי
+    ]
+    out = rtl_lines("\n".join(lines))
+    assert [line.startswith(RLM) for line in out.split("\n")] == [True, True, True, False, False, False]
+    assert rtl_lines(out) == out  # שורה שכבר מתחילה ב-RLM לא מקבלת עוד אחד
+
+
+def test_rtl_mark_skips_lines_inside_pre():
+    text = "<pre>npm install  # התקנה\nnpm start  # הרצה</pre>\nCodeKeeper מוכן"
+    assert rtl_lines(text) == "<pre>npm install  # התקנה\nnpm start  # הרצה</pre>\n" + RLM + "CodeKeeper מוכן"

@@ -8,6 +8,7 @@ from telegram import Chat, Message, MessageEntity, Update, User
 import handlers
 import llm
 from fakes import FakeBot
+from telegram_format import RLM
 
 
 def _context(bot):
@@ -112,6 +113,18 @@ def test_message_right_after_start_sees_the_welcome(tmp_db, monkeypatch):
 
     asyncio.run(main())
     assert seen_history == [["/start", handlers.WELCOME_TEXT]]
+
+
+def test_english_first_lines_reach_telegram_rtl_but_history_stays_clean(tmp_db, monkeypatch, fake_bot):
+    """טלגרם מציג שורה עברית שמתחילה באנגלית משמאל לימין — RLM מתקן, רק ביציאה."""
+    answer_text = "<b>CodeKeeper</b> עוזר למפתחים.\nהמסמך נגיש מכל סוכן."
+    monkeypatch.setattr(handlers, "generate_answer", lambda h, t: llm.Answer(
+        text=answer_text, ok=True, follow_up_questions=["Claude Code מתאים לי?"]))
+    asyncio.run(handlers._answer_and_reply(_context(fake_bot), user_id="u1", chat_id=1, text="שאלה"))
+    first, second = fake_bot.sent[0]["text"].split("\n")
+    assert first.startswith(RLM) and not second.startswith(RLM)
+    assert fake_bot.sent[-1]["reply_markup"].inline_keyboard[0][0].text.startswith(RLM)
+    assert handlers.get_history("u1", 10)[1]["content"] == answer_text  # הזיכרון בלי סימנים נסתרים
 
 
 def test_rejected_html_falls_back_to_clean_plain_text():

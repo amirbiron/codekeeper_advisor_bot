@@ -1,7 +1,7 @@
 # מדריך מימוש: בוט "יועץ CodeKeeper" לטלגרם
 
 ::: abstract
-בוט טלגרם שעונה לגולשים ששוקלים את CodeKeeper על השאלה אחת שמעניינת אותם: "זה יתאים לאופן שבו אני עובד?". הוא עונה מתוך מסמך ידע אחד, זוכר את רצף השיחה, ואין לו פאנל ניהול. הקוד חולץ מהריפו `ai-business-bot`, צומצם למה שהבוט הזה צריך, ותוקנו בו שבעה באגים שקיימים במקור. כל קובץ במדריך הוא קוד שרץ, וטסט מוודא שהוא זהה לקובץ בריפו: 40 טסטים עוברים, כל טסט הוכח כמסוגל להיכשל, והזרימה המלאה הורצה עם הספריות האמיתיות של OpenAI וטלגרם מול שרתים מקומיים.
+בוט טלגרם שעונה לגולשים ששוקלים את CodeKeeper על השאלה אחת שמעניינת אותם: "זה יתאים לאופן שבו אני עובד?". הוא עונה מתוך מסמך ידע אחד, זוכר את רצף השיחה, ואין לו פאנל ניהול. הקוד חולץ מהריפו `ai-business-bot`, צומצם למה שהבוט הזה צריך, ותוקנו בו שבעה באגים שקיימים במקור. כל קובץ במדריך הוא קוד שרץ, וטסט מוודא שהוא זהה לקובץ בריפו: 43 טסטים עוברים, כל טסט הוכח כמסוגל להיכשל, והזרימה המלאה הורצה עם הספריות האמיתיות של OpenAI וטלגרם מול שרתים מקומיים.
 :::
 
 **נבדק מול:** python-telegram-bot 22.8, openai 3.36.1, Python 3.13 — אוקטובר 2026. הגרסאות נעוצות ב-`requirements.txt`.
@@ -799,17 +799,20 @@ def rate_limit_guard(handler):
 
 ## 6. `telegram_format.py`
 
-`sanitize_telegram_html` עובר כמו שהוא. נוספו שניים שסוגרים חורים במקור:
+`sanitize_telegram_html` עובר כמו שהוא. נוספו שניים שסוגרים חורים במקור, ואחד שמתקן תצוגה בעברית:
 
 **fallback שבאמת נקי.** כשטלגרם דוחה HTML, המקור שולח את אותו טקסט בלי `parse_mode`, אבל הטקסט כבר עבר escape. הגולש רואה `<b>` ו-`&amp;` כטקסט. כאן ה-fallback מסיר תגים ומחזיר תווים אמיתיים.
 
 **פיצול מעל 4096 תווים.** זו התקרה של טלגרם (`MessageLimit.MAX_TEXT_LENGTH` בספרייה). בנתיב התשובות במקור אין פיצול, ותשובה ארוכה נכשלת כולה. הפיצול כאן חותך בגבול פסקה, ואם אין כזה בגבול שורה, ואם אין כזה ברווח.
 
+**כיוון שורה.** טלגרם קובע את הכיוון של כל שורה לפי האות החזקה הראשונה בה (Unicode BiDi, כללים P1–P3). שורה עברית שמתחילה ב-"CodeKeeper", או בתבליט ואחריו מילה באנגלית, מוצגת לכן משמאל לימין: המילה האנגלית נדחקת לשמאל והפיסוק עובר צד. `rtl_lines` מוסיף בתחילת שורה כזו תו בלתי נראה בשם RLM, שנחשב לאות מימין לשמאל. הבדיקה היא על הטקסט הגלוי, בלי תגים, ושורות בתוך `<pre>` לא משתנות, כדי לא להכניס תו נסתר לקוד שמישהו יעתיק. הפונקציה רצה רק ביציאה לטלגרם — לפני הפיצול, כדי שתקרת האורך תכלול את הסימנים — וגם על כפתורי שאלות ההמשך. הזיכרון של הבוט נשמר בלעדיהם.
+
 **`telegram_format.py`**
 
 ```python
 """
-הכנת טקסט לשליחה בטלגרם — סניטציית HTML, גרסת טקסט רגיל, ופיצול הודעות ארוכות.
+הכנת טקסט לשליחה בטלגרם — סניטציית HTML, גרסת טקסט רגיל, פיצול הודעות ארוכות
+וכיוון שורות.
 
 מקור: llm.sanitize_telegram_html בריפו ai-business-bot (כמו שהוא).
 שני חדשים, שסוגרים חורים שקיימים במקור:
@@ -817,10 +820,12 @@ def rate_limit_guard(handler):
   והגולש ראה תגים ו-&amp; כטקסט. כאן ה-fallback הוא טקסט נקי באמת.
 - split_message: טלגרם דוחה הודעה מעל 4096 תווים. במקור אין פיצול, ותשובה
   ארוכה נכשלת כולה.
+ובנוסף rtl_lines: שורה עברית שמתחילה במילה באנגלית מוצגת בטלגרם משמאל לימין.
 """
 
 import html as _html
 import re
+import unicodedata
 
 # Bot API: עד 4096 תווים להודעה.
 # מקור: telegram/constants.py, MessageLimit.MAX_TEXT_LENGTH
@@ -861,6 +866,45 @@ def sanitize_telegram_html(text: str) -> str:
 def html_to_plain(sanitized: str) -> str:
     """ההפך מ-sanitize: בלי תגים, עם תווים אמיתיים במקום &lt; / &amp;."""
     return _html.unescape(_TAG_RE.sub("", sanitized))
+
+
+# RIGHT-TO-LEFT MARK: תו בלתי נראה מסוג R — "אות" מימין לשמאל שאינה מוצגת
+RLM = "\u200f"
+
+# שורות בתוך <pre> הן קוד: תו נסתר שם נכנס למה שהגולש מעתיק
+_PRE_TAG_RE = re.compile(r"</?pre>")
+_STRONG = ("L", "R", "AL")
+
+
+def _starts_ltr_in_rtl_line(visible: str) -> bool:
+    """האות החזקה הראשונה משמאל לימין, ויש בשורה גם אות מימין לשמאל."""
+    classes = [unicodedata.bidirectional(ch) for ch in visible]
+    first_strong = next((c for c in classes if c in _STRONG), None)
+    return first_strong == "L" and any(c in ("R", "AL") for c in classes)
+
+
+def rtl_lines(text: str) -> str:
+    """RLM בתחילת כל שורה עברית שהאות הראשונה בה באנגלית.
+
+    טלגרם קובע את הכיוון של כל שורה לפי האות החזקה הראשונה בה — כל שורה היא
+    פסקה, והכיוון שלה נקבע לפי התו הראשון מסוג L, R או AL. שורה כמו
+    "CodeKeeper עוזר למפתחים" מוצגת לכן משמאל לימין, והסדר בה מתבלבל.
+    תבליט, אימוג'י ומספר אינם אותיות חזקות, ולכן "• CodeKeeper ..." נשברת גם היא.
+    מקור: https://www.unicode.org/reports/tr9/#P2 (כללים P1-P3)
+
+    הבדיקה על הטקסט הגלוי, בלי תגים — <b> לא מוצג, ולכן אינו קובע כיוון.
+    שורה שמתחילה כבר ב-RLM לא מקבלת עוד אחד, ושורות בתוך <pre> לא משתנות.
+    """
+    out = []
+    in_pre = False
+    for line in text.split("\n"):
+        starts_in_code = in_pre or line.lstrip().startswith("<pre>")
+        for tag in _PRE_TAG_RE.findall(line):
+            in_pre = tag == "<pre>"
+        if not starts_in_code and _starts_ltr_in_rtl_line(html_to_plain(line)):
+            line = RLM + line
+        out.append(line)
+    return "\n".join(out)
 
 
 def split_message(text: str, limit: int = TELEGRAM_MAX_LENGTH) -> list[str]:
@@ -939,14 +983,15 @@ from config import CONTACT_URL, CONTEXT_WINDOW_SIZE, HISTORY_RETENTION_DAYS
 from history import get_history, save_exchange
 from llm import generate_answer
 from rate_limiter import check_rate_limit, rate_limit_guard, record_message
-from telegram_format import html_to_plain, sanitize_telegram_html, split_message
+from telegram_format import html_to_plain, rtl_lines, sanitize_telegram_html, split_message
 
 logger = logging.getLogger(__name__)
 
 WELCOME_TEXT = (
     "היי! אני כאן כדי לעזור לך לבדוק בכנות אם CodeKeeper באמת מתאים לאיך שאתה עובד עם סוכני AI, "
-    "או שאולי פתרון פשוט יותר יספיק לך. כדי שלא אשפוך עליך סתם מידע, בוא נתחיל מאיך אתה עובד היום: "
-    "באילו סוכנים אתה משתמש (Claude Code, צ'אט בדפדפן), "
+    "או שאולי פתרון פשוט יותר יספיק לך.\n"
+    "כדי שלא אשפוך עליך סתם מידע, בוא נתחיל מאיך אתה עובד היום:\n"
+    "באילו סוכנים אתה משתמש (Claude Code, צ'אט בדפדפן)?\n"
     "והאם קורה לך הרבה שהם שוכחים החלטות ארכיטקטורה ישנות וחוזרים על טעויות?\n\n"
     f"<i>כדי שאזכור את ההקשר, השיחה נשמרת אצלי {HISTORY_RETENTION_DAYS} ימים ואז נמחקת.</i>"
 )
@@ -981,11 +1026,12 @@ async def _typing_indicator(bot, chat_id: int, interval: float = 4.0):
 
 
 async def _send_text(bot, chat_id: int, text: str, reply_markup=None) -> None:
-    """שליחת תשובת AI: סניטציה ← פיצול ← HTML, ו-fallback לטקסט נקי.
+    """שליחת תשובת AI: סניטציה ← כיוון שורות ← פיצול ← HTML, ו-fallback לטקסט נקי.
 
     המקלדת מוצמדת רק לחלק האחרון, כך שהכפתור יופיע מתחת לסוף התשובה.
+    כיוון השורות לפני הפיצול, כדי שתקרת האורך תכלול את סימני ה-RLM שנוספו.
     """
-    chunks = split_message(sanitize_telegram_html(text))
+    chunks = split_message(rtl_lines(sanitize_telegram_html(text)))
     for i, chunk in enumerate(chunks):
         markup = reply_markup if i == len(chunks) - 1 else None
         try:
@@ -1035,7 +1081,7 @@ def _build_follow_up_keyboard(questions: list[str], bot_data: dict, user_id: str
     for i, q in enumerate(questions):
         cb_id = f"{FOLLOW_UP_CB_PREFIX}{user_id}_{now}_{i}"
         bot_data[cb_id] = q
-        buttons.append([InlineKeyboardButton(f"💡 {q}", callback_data=cb_id)])
+        buttons.append([InlineKeyboardButton(rtl_lines(f"💡 {q}"), callback_data=cb_id)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -1137,7 +1183,7 @@ async def follow_up_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     record_message(user_id)
     # הכפתורים נעלמים ובמקומם נשארת השאלה שנבחרה (טקסט רגיל, בלי parse_mode)
-    await query.edit_message_text(f"💡 {question}")
+    await query.edit_message_text(rtl_lines(f"💡 {question}"))
     await _answer_and_reply(context, user_id=user_id, chat_id=update.effective_chat.id, text=question)
 
 
@@ -1284,7 +1330,7 @@ if __name__ == "__main__":
 
 ## 9. טסטים
 
-40 טסטים, בלי רשת: OpenAI מוחלף ב-client מזויף שמחזיר אובייקטי `ChatCompletion` אמיתיים של ה-SDK, וטלגרם מוחלף ב-`FakeBot`. כל טסט מקבל DB זמני משלו.
+43 טסטים, בלי רשת: OpenAI מוחלף ב-client מזויף שמחזיר אובייקטי `ChatCompletion` אמיתיים של ה-SDK, וטלגרם מוחלף ב-`FakeBot`. כל טסט מקבל DB זמני משלו.
 
 **כל טסט הוכח כמסוגל להיכשל.** שברתי את הקוד בכוונה בכל נקודה רגישה וווידאתי שהטסט המתאים נופל:
 
@@ -1306,6 +1352,9 @@ if __name__ == "__main__":
 | שינוי בקובץ קוד בלי אותו שינוי במדריך | `test_every_file_in_the_guide_matches_the_repo` |
 | `/start` בלי שמירת הפתיחה בהיסטוריה | `test_start_saves_the_welcome_so_the_first_reply_has_its_question` |
 | `/start` בלי המנעול של הגולש | `test_message_right_after_start_sees_the_welcome` |
+| שליחת תשובה בלי `rtl_lines` | `test_english_first_lines_reach_telegram_rtl_but_history_stays_clean` |
+| בדיקת הכיוון על הטקסט עם התגים | `test_rtl_mark_on_hebrew_lines_whose_first_letter_is_english` |
+| RLM גם בשורות שבתוך `<pre>` | `test_rtl_mark_skips_lines_inside_pre` |
 
 לטסט ה-BiDi יש גם הוכחה שלא תוכננה: בכתיבה הראשונה שלו, ה-escapes נשמרו בקובץ כתווים עצמם, והטסט נפל על עצמו.
 
@@ -1572,6 +1621,7 @@ from telegram import Chat, Message, MessageEntity, Update, User
 import handlers
 import llm
 from fakes import FakeBot
+from telegram_format import RLM
 
 
 def _context(bot):
@@ -1676,6 +1726,18 @@ def test_message_right_after_start_sees_the_welcome(tmp_db, monkeypatch):
 
     asyncio.run(main())
     assert seen_history == [["/start", handlers.WELCOME_TEXT]]
+
+
+def test_english_first_lines_reach_telegram_rtl_but_history_stays_clean(tmp_db, monkeypatch, fake_bot):
+    """טלגרם מציג שורה עברית שמתחילה באנגלית משמאל לימין — RLM מתקן, רק ביציאה."""
+    answer_text = "<b>CodeKeeper</b> עוזר למפתחים.\nהמסמך נגיש מכל סוכן."
+    monkeypatch.setattr(handlers, "generate_answer", lambda h, t: llm.Answer(
+        text=answer_text, ok=True, follow_up_questions=["Claude Code מתאים לי?"]))
+    asyncio.run(handlers._answer_and_reply(_context(fake_bot), user_id="u1", chat_id=1, text="שאלה"))
+    first, second = fake_bot.sent[0]["text"].split("\n")
+    assert first.startswith(RLM) and not second.startswith(RLM)
+    assert fake_bot.sent[-1]["reply_markup"].inline_keyboard[0][0].text.startswith(RLM)
+    assert handlers.get_history("u1", 10)[1]["content"] == answer_text  # הזיכרון בלי סימנים נסתרים
 
 
 def test_rejected_html_falls_back_to_clean_plain_text():
@@ -1932,7 +1994,7 @@ def test_guard_holds_under_concurrent_updates():
 **`tests/test_telegram_format.py`**
 
 ```python
-from telegram_format import html_to_plain, sanitize_telegram_html, split_message
+from telegram_format import RLM, html_to_plain, rtl_lines, sanitize_telegram_html, split_message
 
 
 def test_sanitize_keeps_telegram_tags_and_escapes_the_rest():
@@ -1970,6 +2032,25 @@ def test_split_message_hard_cuts_a_single_huge_word():
 
 def test_short_message_is_one_chunk():
     assert split_message("  שלום  ") == ["שלום"]
+
+
+def test_rtl_mark_on_hebrew_lines_whose_first_letter_is_english():
+    lines = [
+        "CodeKeeper עוזר למפתחים",        # מתחילה באנגלית ← RLM
+        "• Claude Code עובד גם מהנייד",   # תבליט אינו אות ← RLM
+        "<b>CodeKeeper</b> שומר מסמכים",  # התג אינו מוצג ← RLM
+        "המסמך נגיש מ-Claude Code",        # מתחילה בעברית ← בלי
+        "<b>שמירה</b> עם CodeKeeper",      # האות הגלויה הראשונה בעברית ← בלי
+        "Claude Code",                      # בלי עברית ← בלי
+    ]
+    out = rtl_lines("\n".join(lines))
+    assert [line.startswith(RLM) for line in out.split("\n")] == [True, True, True, False, False, False]
+    assert rtl_lines(out) == out  # שורה שכבר מתחילה ב-RLM לא מקבלת עוד אחד
+
+
+def test_rtl_mark_skips_lines_inside_pre():
+    text = "<pre>npm install  # התקנה\nnpm start  # הרצה</pre>\nCodeKeeper מוכן"
+    assert rtl_lines(text) == "<pre>npm install  # התקנה\nnpm start  # הרצה</pre>\n" + RLM + "CodeKeeper מוכן"
 ```
 
 :::
@@ -2061,7 +2142,7 @@ services:
 ## 12. מה אומת ומה לא
 
 **אומת:**
-- 40 טסטים עוברים, ו-16 שבירות מכוונות של הקוד נתפסו כל אחת בטסט שלה. לפני כל שבירה ריצת הבסיס עברה, והכשל אחריה היה ב-assert ולא בקריסה.
+- 43 טסטים עוברים, ו-19 שבירות מכוונות של הקוד נתפסו כל אחת בטסט שלה. לפני כל שבירה ריצת הבסיס עברה, והכשל אחריה היה ב-assert ולא בקריסה.
 - הרצה מקצה לקצה עם python-telegram-bot ו-openai האמיתיים, מול שרת Bot API מקומי ושרת OpenAI מקומי: הודעה ← חיווי הקלדה ← תשובה ב-HTML ← כפתורי שאלות המשך ← לחיצה ← תשובה עם כפתור יצירת קשר. הבקשה ל-OpenAI יצאה עם `max_completion_tokens` ובלי `temperature`, ההוראות בתפקיד `developer`, ובקריאה השנייה ההיסטוריה כללה את הזוג הראשון. הודעה בקבוצה לא הגיעה ל-AI. הודעה ערוכה, גם טקסט וגם `/start`, לא הגיעה לאף handler — לפני התיקון שתיהן הפילו `AttributeError`, והגולש קיבל "משהו השתבש".
 - הלוג של אותה הרצה: בלי הטוקן, בלי שם הגולש ובלי טקסט ההודעה. אותה הרצה בלי השורה שמשתיקה את `httpx`: הטוקן הופיע ב-17 שורות.
 - ולידציית ההגדרות: הרצה בלי טוקן, בלי מפתח, בלי מסמך ועם `CONTACT_URL` שגוי — ארבע שגיאות ברורות ויציאה עם קוד 1.
